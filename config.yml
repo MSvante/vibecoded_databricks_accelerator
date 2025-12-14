@@ -1,0 +1,69 @@
+# Databricks ETL Framework Configuration
+# This file defines all tables in the data pipeline with their metadata
+
+tables:
+  # Bronze Layer - Raw data ingestion
+  - name: customers_bronze
+    layer: bronze
+    tags:
+      - bronze
+      - daily
+      - critical
+    depends_on: []
+    source:
+      # TODO: Define extraction strategy (currently TBD)
+      type: TBD
+      path: TBD
+    description: "Raw customer data from source system"
+
+  - name: orders_bronze
+    layer: bronze
+    tags:
+      - bronze
+      - daily
+    depends_on: []
+    source:
+      type: TBD
+      path: TBD
+    description: "Raw order transactions from source system"
+
+  # Silver Layer - Cleaned and validated data
+  - name: customers_silver
+    layer: silver
+    tags:
+      - silver
+      - daily
+      - critical
+    depends_on:
+      - customers_bronze
+    description: "Cleaned and deduplicated customer records"
+
+  - name: orders_silver
+    layer: silver
+    tags:
+      - silver
+      - daily
+    depends_on:
+      - orders_bronze
+      - customers_silver
+    description: "Validated orders with customer enrichment"
+
+  # Gold Layer - Business-level aggregations
+  - name: customer_metrics_gold
+    layer: gold
+    tags:
+      - gold
+      - daily
+      - analytics
+    depends_on:
+      - customers_silver
+      - orders_silver
+    description: "Customer lifetime value and engagement metrics"
+
+# Configuration Notes:
+# - name: Must match the transformation file name (e.g., customers_bronze.py)
+# - layer: One of [bronze, silver, gold]
+# - tags: List of tags for selective execution via --tags parameter
+# - depends_on: List of upstream table names (must exist in this config)
+# - source: Extraction configuration (TBD - future enhancement)
+# - description: Human-readable description of the table's purpose

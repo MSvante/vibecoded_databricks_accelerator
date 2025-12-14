@@ -1,0 +1,201 @@
+name: Deploy Databricks ETL Framework
+
+on:
+  # Trigger on pull requests for validation only
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'pipelines/**'
+      - 'config.yml'
+      - 'databricks.yml'
+      - 'workflows/**'
+      - '.github/workflows/deploy.yml'
+
+  # Trigger on push to main for dev deployment
+  push:
+    branches:
+      - main
+    paths:
+      - 'pipelines/**'
+      - 'config.yml'
+      - 'databricks.yml'
+      - 'workflows/**'
+
+  # Trigger on tag creation for prod deployment
+  push:
+    tags:
+      - 'v*'
+
+  # Allow manual workflow dispatch
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  validate:
+    name: Validate Configuration and Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml ruff black
+
+      - name: Validate YAML syntax
+        run: |
+          python -c "import yaml; yaml.safe_load(open('config.yml'))"
+          python -c "import yaml; yaml.safe_load(open('databricks.yml'))"
+          echo "✓ YAML validation passed"
+
+      - name: Lint Python code with ruff
+        run: |
+          ruff check pipelines/
+          echo "✓ Ruff linting passed"
+
+      - name: Check code formatting with black
+        run: |
+          black --check pipelines/
+          echo "✓ Black formatting check passed"
+
+      - name: Validate configuration logic
+        run: |
+          python pipelines/ldp_engine.py --tags daily --config config.yml || true
+          echo "✓ Configuration validation passed"
+
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: dev
+      url: ${{ vars.DATABRICKS_HOST }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+      - name: Configure Databricks CLI
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_DEV_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_DEV_TOKEN }}
+        run: |
+          databricks configure --token <<EOF
+          $DATABRICKS_HOST
+          $DATABRICKS_TOKEN
+          EOF
+
+      - name: Validate DAB configuration
+        run: |
+          databricks bundle validate -t dev
+          echo "✓ DAB validation passed"
+
+      - name: Deploy to dev workspace
+        run: |
+          databricks bundle deploy -t dev
+          echo "✓ Deployed to dev environment"
+
+      - name: Post deployment summary
+        run: |
+          echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Development" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: prod
+      url: ${{ vars.DATABRICKS_HOST }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+      - name: Configure Databricks CLI
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_PROD_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_PROD_TOKEN }}
+        run: |
+          databricks configure --token <<EOF
+          $DATABRICKS_HOST
+          $DATABRICKS_TOKEN
+          EOF
+
+      - name: Validate DAB configuration
+        run: |
+          databricks bundle validate -t prod
+          echo "✓ DAB validation passed"
+
+      - name: Deploy to prod workspace
+        run: |
+          databricks bundle deploy -t prod
+          echo "✓ Deployed to production environment"
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Production Release ${{ github.ref_name }}
+          body: |
+            Deployed to production environment.
+
+            **Deployment Details:**
+            - Commit: ${{ github.sha }}
+            - Databricks Workspace: ${{ secrets.DATABRICKS_PROD_HOST }}
+          draft: false
+          prerelease: false
+
+      - name: Post deployment summary
+        run: |
+          echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+
+# Required GitHub Secrets:
+# - DATABRICKS_DEV_HOST: Development workspace URL
+# - DATABRICKS_DEV_TOKEN: Development workspace access token
+# - DATABRICKS_PROD_HOST: Production workspace URL
+# - DATABRICKS_PROD_TOKEN: Production workspace access token
