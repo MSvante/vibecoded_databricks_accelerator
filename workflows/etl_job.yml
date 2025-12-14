@@ -1,95 +1,101 @@
 # Databricks Workflow Configuration for ETL Pipeline
-# This workflow executes the LDP engine with parameterized tags and mode
+# This workflow executes the LDP engine with parameterized tags
 
 resources:
   jobs:
-    etl_pipeline:
-      name: "ETL Pipeline - LDP Engine"
-      description: "Executes Lakeflow Declarative Pipelines based on tag-based configuration"
+    # Finance Pipeline - Runs at 2 AM
+    etl_pipeline_finance:
+      name: "ETL Pipeline - Finance"
+      description: "Finance domain tables processing"
 
-      # Job parameters - can be overridden at runtime
+      parameters:
+        - name: tags
+          default: "finance"
+        - name: mode
+          default: "batch"
+
+      # Schedule: Daily at 2 AM UTC
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "UTC"
+        pause_status: "UNPAUSED"
+
+      tasks:
+        - task_key: run_finance_pipeline
+          description: "Execute LDP engine with finance tags"
+
+          python_wheel_task:
+            package_name: "databricks_etl_framework"
+            entry_point: "ldp_engine"
+            parameters:
+              - "--tags"
+              - "{{job.parameters.tags}}"
+              - "--mode"
+              - "{{job.parameters.mode}}"
+              - "--environment"
+              - "${var.environment}"
+
+          new_cluster:
+            spark_version: "13.3.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 2
+
+      email_notifications:
+        on_failure:
+          - data-eng-alerts@company.com
+
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+
+    # Daily Pipeline - Runs at 3 AM
+    etl_pipeline_daily:
+      name: "ETL Pipeline - Daily"
+      description: "Daily batch processing for all tables"
+
       parameters:
         - name: tags
           default: "daily"
         - name: mode
           default: "batch"
-        - name: tag_mode
-          default: "OR"
 
-      # Email notifications
-      email_notifications:
-        on_failure:
-          - data-engineering-team@company.com
-        on_success: []
-        no_alert_for_skipped_runs: true
+      # Schedule: Daily at 3 AM UTC
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: "UTC"
+        pause_status: "UNPAUSED"
 
-      # Workflow schedule (optional)
-      # Uncomment to enable scheduled runs
-      # schedule:
-      #   quartz_cron_expression: "0 0 2 * * ?"  # Daily at 2 AM
-      #   timezone_id: "UTC"
-      #   pause_status: "UNPAUSED"
-
-      # Maximum concurrent runs
-      max_concurrent_runs: 1
-
-      # Timeout
-      timeout_seconds: 7200  # 2 hours
-
-      # Task definition
       tasks:
-        - task_key: run_ldp_engine
-          description: "Execute LDP engine with specified tags"
+        - task_key: run_daily_pipeline
+          description: "Execute LDP engine with daily tags"
 
-          # DLT Pipeline task
-          pipeline_task:
-            pipeline_id: "${var.dlt_pipeline_id}"
-            full_refresh: false
+          python_wheel_task:
+            package_name: "databricks_etl_framework"
+            entry_point: "ldp_engine"
+            parameters:
+              - "--tags"
+              - "{{job.parameters.tags}}"
+              - "--mode"
+              - "{{job.parameters.mode}}"
+              - "--environment"
+              - "${var.environment}"
 
-          # Alternatively, use notebook_task for custom execution
-          # notebook_task:
-          #   notebook_path: "/Workspace/etl_framework/pipelines/ldp_engine"
-          #   base_parameters:
-          #     tags: "{{job.parameters.tags}}"
-          #     mode: "{{job.parameters.mode}}"
-          #     tag_mode: "{{job.parameters.tag_mode}}"
-
-          # Cluster configuration
           new_cluster:
             spark_version: "13.3.x-scala2.12"
-            node_type_id: "Standard_DS3_v2"  # Adjust based on your cloud provider
+            node_type_id: "Standard_DS3_v2"
             num_workers: 2
             autoscale:
-              min_workers: 1
-              max_workers: 4
+              min_workers: 2
+              max_workers: 8
 
-            # Spark configuration
-            spark_conf:
-              "spark.databricks.delta.preview.enabled": "true"
-              "spark.databricks.delta.retentionDurationCheck.enabled": "false"
+      email_notifications:
+        on_failure:
+          - data-eng-alerts@company.com
 
-            # Custom tags for cost tracking
-            custom_tags:
-              Project: "ETL_Framework"
-              Environment: "${var.environment}"
-              ManagedBy: "Databricks_Asset_Bundle"
-
-          # Retry policy
-          retry_on_timeout: true
-          max_retries: 2
-          min_retry_interval_millis: 60000  # 1 minute
-
-      # Job-level tags
-      tags:
-        project: "databricks_etl_framework"
-        team: "data_engineering"
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
 
 # Variables referenced in this configuration
-# These should be defined in databricks.yml or passed at deployment time
 variables:
-  dlt_pipeline_id:
-    description: "ID of the DLT pipeline to execute"
-    default: ""  # Set during deployment
   environment:
-    description: "Deployment environment (dev/prod)"
+    description: "Deployment environment (dev/test/prod)"
     default: "dev"

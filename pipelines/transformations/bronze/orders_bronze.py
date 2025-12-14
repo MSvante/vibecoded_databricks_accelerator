@@ -1,50 +1,36 @@
 """Bronze layer transformation for orders data.
 
-This module ingests raw order transactions from the source system.
+This module contains the transformation logic for ingesting raw order data
+from the landing zone. Bronze layer ONLY adds housekeeping columns - no business logic.
 """
 
-import dlt
-from pyspark.sql import DataFrame
-from pyspark.sql.functions import current_timestamp, lit
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.functions import current_timestamp, lit, input_file_name
 
 
-@dlt.table(
-    name="orders_bronze",
-    comment="Raw order transactions from source system",
-    table_properties={
-        "quality": "bronze",
-        "pipelines.autoOptimize.managed": "true"
-    }
-)
-def orders_bronze() -> DataFrame:
+def transform(source_df: DataFrame, spark: SparkSession) -> DataFrame:
     """
-    Ingest raw order transaction data.
+    Apply bronze layer transformation to order data.
+
+    Bronze layer transformation rules:
+    - Add _ingestion_timestamp: When data was ingested
+    - Add _source_system: Source identifier (landing_zone)
+    - Add _source_file: Which file was processed
+    - Preserve ALL source columns as-is
+    - NO business logic transformations
+    - NO data quality filtering (lenient)
+
+    Args:
+        source_df: Raw DataFrame read from landing zone
+        spark: SparkSession instance
 
     Returns:
-        DataFrame: Raw order data with ingestion metadata
+        DataFrame: Source data with housekeeping columns added
     """
-    from pyspark.sql.types import StructType, StructField, StringType, DecimalType, TimestampType
-
-    schema = StructType([
-        StructField("order_id", StringType(), False),
-        StructField("customer_id", StringType(), False),
-        StructField("order_date", TimestampType(), True),
-        StructField("order_amount", DecimalType(10, 2), True),
-        StructField("order_status", StringType(), True),
-    ])
-
-    # Placeholder: Would read from source in production
-    df = spark.createDataFrame([], schema)
-
-    # Add bronze metadata
-    bronze_df = df.withColumn("_ingestion_timestamp", current_timestamp()) \
-                  .withColumn("_source_system", lit("order_system"))
+    # Add housekeeping columns only
+    bronze_df = (source_df
+                 .withColumn("_ingestion_timestamp", current_timestamp())
+                 .withColumn("_source_system", lit("landing_zone"))
+                 .withColumn("_source_file", input_file_name()))
 
     return bronze_df
-
-
-@dlt.expect_or_drop("valid_order_id", "order_id IS NOT NULL")
-@dlt.expect_or_drop("valid_customer_id", "customer_id IS NOT NULL")
-def orders_bronze_quality():
-    """Data quality expectations for orders bronze layer."""
-    pass
