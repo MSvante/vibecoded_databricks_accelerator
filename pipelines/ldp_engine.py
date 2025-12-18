@@ -72,16 +72,18 @@ class LDPEngine:
         """
         Derive landing zone path from table name and environment.
 
+        Supports two modes:
+        1. Unity Catalog Volumes (use_volumes: true)
+           Example: /Volumes/etl_framework_dev/landing_zone/raw/customers/
+        2. Direct ABFSS access (use_volumes: false)
+           Example: abfss://landing-zone@storageaccountdev.dfs.core.windows.net/raw/customers/
+
         Args:
             table_name: Full table name (e.g., "customers_bronze")
-            source_format: File format (parquet, csv, json, delta)
+            source_format: File format (parquet, csv, json, delta, excel)
 
         Returns:
-            ABFSS path to landing zone files
-
-        Example:
-            table_name="customers_bronze", env="dev" →
-            abfss://landing-zone@storage_account_dev.dfs.core.windows.net/raw/customers/
+            Path to landing zone files (Volume path or ABFSS path)
         """
         # Remove layer suffix from table name (e.g., customers_bronze → customers)
         for suffix in ['_bronze', '_silver', '_gold']:
@@ -91,16 +93,25 @@ class LDPEngine:
         else:
             entity_name = table_name
 
-        # Get landing zone configuration
-        storage_pattern = self.landing_zone_config.get('storage_account_pattern', 'storage_account_{env}')
-        storage_account = storage_pattern.format(env=self.environment)
-        container = self.landing_zone_config.get('container', 'landing-zone')
-        base_path = self.landing_zone_config.get('base_path', 'raw')
+        # Check if using Unity Catalog Volumes
+        use_volumes = self.landing_zone_config.get('use_volumes', False)
 
-        # Construct ABFSS path
-        path = f"abfss://{container}@{storage_account}.dfs.core.windows.net/{base_path}/{entity_name}/"
+        if use_volumes:
+            # Use Unity Catalog Volume path
+            volume_pattern = self.landing_zone_config.get('volume_pattern', '/Volumes/etl_framework_{env}/landing_zone/raw')
+            base_volume_path = volume_pattern.format(env=self.environment)
+            path = f"{base_volume_path}/{entity_name}/"
+            print(f"  Derived volume path for {table_name}: {path}")
+        else:
+            # Use direct ABFSS storage access
+            storage_pattern = self.landing_zone_config.get('storage_account_pattern', 'storageaccount{env}')
+            storage_account = storage_pattern.format(env=self.environment)
+            container = self.landing_zone_config.get('container', 'landing-zone')
+            base_path = self.landing_zone_config.get('base_path', 'raw')
 
-        print(f"  Derived path for {table_name}: {path}")
+            path = f"abfss://{container}@{storage_account}.dfs.core.windows.net/{base_path}/{entity_name}/"
+            print(f"  Derived ABFSS path for {table_name}: {path}")
+
         return path
 
     def filter_tables_by_tags(self, tags: List[str], tag_mode: str = "OR") -> List[Dict]:

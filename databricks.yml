@@ -103,7 +103,7 @@ targets:
   dev:
     mode: development
     workspace:
-      host: "https://adb-XXXXXXXXXX.X.azuredatabricks.net"  # Replace with your workspace URL
+      host: "https://dbc-836ab11b-8e27.cloud.databricks.com"
 
     variables:
       environment: "dev"
