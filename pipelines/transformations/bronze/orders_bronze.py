@@ -5,7 +5,7 @@ from the landing zone. Bronze layer ONLY adds housekeeping columns - no business
 """
 
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import current_timestamp, lit, input_file_name
+from pyspark.sql.functions import current_timestamp, input_file_name, lit
 
 
 def transform(source_df: DataFrame, spark: SparkSession) -> DataFrame:
@@ -28,9 +28,10 @@ def transform(source_df: DataFrame, spark: SparkSession) -> DataFrame:
         DataFrame: Source data with housekeeping columns added
     """
     # Add housekeeping columns only
-    bronze_df = (source_df
-                 .withColumn("_ingestion_timestamp", current_timestamp())
-                 .withColumn("_source_system", lit("landing_zone"))
-                 .withColumn("_source_file", input_file_name()))
+    bronze_df = (
+        source_df.withColumn("_ingestion_timestamp", current_timestamp())
+        .withColumn("_source_system", lit("landing_zone"))
+        .withColumn("_source_file", input_file_name())
+    )
 
     return bronze_df

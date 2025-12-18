@@ -5,13 +5,13 @@ Gold layer combines data from multiple silver tables and applies business logic.
 """
 
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import (
-    col, count, sum as spark_sum, avg,
-    current_timestamp, datediff, current_date
-)
+from pyspark.sql.functions import avg, col, count, current_date, current_timestamp, datediff
+from pyspark.sql.functions import sum as spark_sum
 
 
-def transform(customers_silver_df: DataFrame, orders_silver_df: DataFrame, spark: SparkSession) -> DataFrame:
+def transform(
+    customers_silver_df: DataFrame, orders_silver_df: DataFrame, spark: SparkSession
+) -> DataFrame:
     """
     Calculate customer-level business metrics.
 
@@ -42,24 +42,19 @@ def transform(customers_silver_df: DataFrame, orders_silver_df: DataFrame, spark
         col("full_name"),
         col("email"),
         col("created_at").alias("account_created_date"),
-
         # Calculate customer tenure
-        datediff(current_date(), col("created_at")).alias("customer_tenure_days")
+        datediff(current_date(), col("created_at")).alias("customer_tenure_days"),
     )
 
     # Order aggregations
     order_aggregations = orders_silver_df.groupBy("customer_id").agg(
         count("order_id").alias("total_orders"),
         spark_sum("order_amount").alias("total_revenue"),
-        avg("order_amount").alias("avg_order_value")
+        avg("order_amount").alias("avg_order_value"),
     )
 
     # Join customer base with order metrics
-    customer_metrics = customer_base.join(
-        order_aggregations,
-        on="customer_id",
-        how="left"
-    )
+    customer_metrics = customer_base.join(order_aggregations, on="customer_id", how="left")
 
     # Add gold layer metadata
     gold_df = customer_metrics.withColumn("_gold_processed_at", current_timestamp())

@@ -4,10 +4,12 @@ This module validates and enriches order data with customer information.
 """
 
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, upper, current_timestamp, when
+from pyspark.sql.functions import col, current_timestamp, upper, when
 
 
-def transform(orders_bronze_df: DataFrame, customers_silver_df: DataFrame, spark: SparkSession) -> DataFrame:
+def transform(
+    orders_bronze_df: DataFrame, customers_silver_df: DataFrame, spark: SparkSession
+) -> DataFrame:
     """
     Clean, validate, and enrich order data.
 
@@ -33,19 +35,19 @@ def transform(orders_bronze_df: DataFrame, customers_silver_df: DataFrame, spark
         col("order_date"),
         col("order_amount"),
         upper(col("order_status")).alias("order_status"),
-        col("_ingestion_timestamp")
+        col("_ingestion_timestamp"),
     )
 
     # Enrich with customer data
     enriched_orders = cleaned_orders.join(
         customers_silver_df.select("customer_id", "full_name", "email"),
         on="customer_id",
-        how="left"
+        how="left",
     )
 
     # Add derived fields
-    final_df = (enriched_orders
-                .withColumn("is_completed", when(col("order_status") == "COMPLETED", True).otherwise(False))
-                .withColumn("_silver_processed_at", current_timestamp()))
+    final_df = enriched_orders.withColumn(
+        "is_completed", when(col("order_status") == "COMPLETED", True).otherwise(False)
+    ).withColumn("_silver_processed_at", current_timestamp())
 
     return final_df

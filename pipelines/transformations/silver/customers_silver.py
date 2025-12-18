@@ -6,8 +6,13 @@ Silver layer applies business rules, deduplication, and data quality checks.
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import (
-    col, trim, lower, regexp_replace, concat_ws,
-    row_number, current_timestamp
+    col,
+    concat_ws,
+    current_timestamp,
+    lower,
+    regexp_replace,
+    row_number,
+    trim,
 )
 from pyspark.sql.window import Window
 
@@ -39,34 +44,30 @@ def transform(customers_bronze_df: DataFrame, spark: SparkSession) -> DataFrame:
     # Data cleaning transformations
     cleaned_df = customers_bronze_df.select(
         col("customer_id"),
-
         # Standardize name fields: trim whitespace
         trim(col("first_name")).alias("first_name"),
         trim(col("last_name")).alias("last_name"),
-
         # Standardize email: lowercase, trim
         lower(trim(col("email"))).alias("email"),
-
         # Normalize phone: remove non-numeric characters
         regexp_replace(col("phone"), "[^0-9]", "").alias("phone"),
-
         col("created_at"),
-        col("_ingestion_timestamp")
+        col("_ingestion_timestamp"),
     )
 
     # Add derived fields
     enriched_df = cleaned_df.withColumn(
-        "full_name",
-        concat_ws(" ", col("first_name"), col("last_name"))
+        "full_name", concat_ws(" ", col("first_name"), col("last_name"))
     )
 
     # Deduplication: Keep most recent record per customer_id
     window_spec = Window.partitionBy("customer_id").orderBy(col("_ingestion_timestamp").desc())
 
-    deduplicated_df = (enriched_df
-                       .withColumn("row_num", row_number().over(window_spec))
-                       .filter(col("row_num") == 1)
-                       .drop("row_num"))
+    deduplicated_df = (
+        enriched_df.withColumn("row_num", row_number().over(window_spec))
+        .filter(col("row_num") == 1)
+        .drop("row_num")
+    )
 
     # Add silver layer metadata
     silver_df = deduplicated_df.withColumn("_silver_processed_at", current_timestamp())

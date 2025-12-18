@@ -11,10 +11,10 @@ The workflow calls this engine with tags like "finance" or "daily",
 and this engine creates the actual DLT pipeline tables.
 """
 
-import os
 import importlib
+import os
 from pathlib import Path
-from typing import List, Dict, Set
+
 import yaml
 
 # Use Databricks Declarative Pipelines API
@@ -56,14 +56,14 @@ class LDPEngine:
         if not config_file.exists():
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
 
-        with open(config_file, 'r') as f:
+        with open(config_file) as f:
             self.config = yaml.safe_load(f)
 
-        if not self.config or 'tables' not in self.config:
+        if not self.config or "tables" not in self.config:
             raise ValueError("Configuration must contain 'tables' key")
 
-        self.tables = self.config['tables']
-        self.landing_zone_config = self.config.get('landing_zone', {})
+        self.tables = self.config["tables"]
+        self.landing_zone_config = self.config.get("landing_zone", {})
 
         print(f"Loaded configuration with {len(self.tables)} tables")
         print(f"Environment: {self.environment}")
@@ -84,33 +84,37 @@ class LDPEngine:
             abfss://landing-zone@storage_account_dev.dfs.core.windows.net/raw/customers/
         """
         # Remove layer suffix from table name (e.g., customers_bronze → customers)
-        for suffix in ['_bronze', '_silver', '_gold']:
+        for suffix in ["_bronze", "_silver", "_gold"]:
             if table_name.endswith(suffix):
-                entity_name = table_name[:-len(suffix)]
+                entity_name = table_name[: -len(suffix)]
                 break
         else:
             entity_name = table_name
 
         # Get landing zone configuration
-        storage_pattern = self.landing_zone_config.get('storage_account_pattern', 'storage_account_{env}')
+        storage_pattern = self.landing_zone_config.get(
+            "storage_account_pattern", "storage_account_{env}"
+        )
         storage_account = storage_pattern.format(env=self.environment)
-        container = self.landing_zone_config.get('container', 'landing-zone')
-        base_path = self.landing_zone_config.get('base_path', 'raw')
+        container = self.landing_zone_config.get("container", "landing-zone")
+        base_path = self.landing_zone_config.get("base_path", "raw")
 
         # Construct ABFSS path
-        path = f"abfss://{container}@{storage_account}.dfs.core.windows.net/{base_path}/{entity_name}/"
+        path = (
+            f"abfss://{container}@{storage_account}.dfs.core.windows.net/{base_path}/{entity_name}/"
+        )
 
         print(f"  Derived path for {table_name}: {path}")
         return path
 
-    def filter_tables_by_tags(self, tags: List[str], tag_mode: str = "OR") -> List[Dict]:
+    def filter_tables_by_tags(self, tags: list[str], tag_mode: str = "OR") -> list[dict]:
         """Filter tables based on specified tags."""
         if not tags:
             return self.tables
 
         filtered = []
         for table in self.tables:
-            table_tags = set(table.get('tags', []))
+            table_tags = set(table.get("tags", []))
 
             if tag_mode == "OR":
                 if any(tag in table_tags for tag in tags):
@@ -122,7 +126,7 @@ class LDPEngine:
         print(f"Filtered to {len(filtered)} tables with tags {tags} (mode={tag_mode})")
         return filtered
 
-    def resolve_dependencies(self, filtered_tables: List[Dict]) -> List[str]:
+    def resolve_dependencies(self, filtered_tables: list[dict]) -> list[str]:
         """
         Resolve table execution order using topological sort.
 
@@ -132,22 +136,22 @@ class LDPEngine:
         # Build dependency graph including upstream dependencies
         all_required_tables = set()
         for table in filtered_tables:
-            all_required_tables.add(table['name'])
-            all_required_tables.update(table.get('depends_on', []))
+            all_required_tables.add(table["name"])
+            all_required_tables.update(table.get("depends_on", []))
 
         # Get full config for all required tables
-        required_configs = [t for t in self.tables if t['name'] in all_required_tables]
+        required_configs = [t for t in self.tables if t["name"] in all_required_tables]
 
         # Topological sort using Kahn's algorithm
-        graph = {t['name']: t.get('depends_on', []) for t in required_configs}
-        in_degree = {name: 0 for name in graph}
+        graph = {t["name"]: t.get("depends_on", []) for t in required_configs}
+        in_degree = dict.fromkeys(graph, 0)
 
         for deps in graph.values():
             for dep in deps:
                 in_degree[dep] = in_degree.get(dep, 0)
 
         for name, deps in graph.items():
-            for dep in deps:
+            for _dep in deps:
                 in_degree[name] += 1
 
         queue = [node for node, degree in in_degree.items() if degree == 0]
@@ -167,7 +171,7 @@ class LDPEngine:
         print(f"Execution order: {' -> '.join(execution_order)}")
         return execution_order, required_configs
 
-    def create_table_function(self, table_config: Dict) -> None:
+    def create_table_function(self, table_config: dict) -> None:
         """
         Dynamically create a @dp.table decorated function for a table.
 
@@ -176,9 +180,9 @@ class LDPEngine:
         - Silver/Gold: Read dependencies, apply transformation
         - Register with @dp.table decorator
         """
-        table_name = table_config['name']
-        layer = table_config['layer']
-        depends_on = table_config.get('depends_on', [])
+        table_name = table_config["name"]
+        layer = table_config["layer"]
+        depends_on = table_config.get("depends_on", [])
 
         print(f"  Creating table function: {table_name}")
 
@@ -187,21 +191,23 @@ class LDPEngine:
         try:
             transform_module = importlib.import_module(module_path)
         except ImportError as e:
-            raise ImportError(f"Failed to import {module_path}: {e}")
+            raise ImportError(f"Failed to import {module_path}: {e}") from e
 
         # Get the transform function
-        transform_func = getattr(transform_module, 'transform')
+        transform_func = transform_module.transform
 
         # Create table function based on layer
-        if layer == 'bronze':
+        if layer == "bronze":
             # Bronze: Read from landing zone
-            source_format = table_config['source'].get('format', self.landing_zone_config.get('default_format', 'parquet'))
+            source_format = table_config["source"].get(
+                "format", self.landing_zone_config.get("default_format", "parquet")
+            )
             source_path = self.derive_landing_zone_path(table_name, source_format)
 
             @dp.table(
                 name=table_name,
-                comment=table_config.get('description', ''),
-                table_properties={"quality": layer}
+                comment=table_config.get("description", ""),
+                table_properties={"quality": layer},
             )
             def table_func():
                 # Read from landing zone
@@ -213,8 +219,8 @@ class LDPEngine:
             # Silver/Gold: Read from dependencies
             @dp.table(
                 name=table_name,
-                comment=table_config.get('description', ''),
-                table_properties={"quality": layer}
+                comment=table_config.get("description", ""),
+                table_properties={"quality": layer},
             )
             def table_func():
                 # Read dependency DataFrames
@@ -225,7 +231,7 @@ class LDPEngine:
         # Store in registry
         self.table_registry[table_name] = table_func
 
-    def execute_pipeline(self, tags: List[str], mode: str = "batch", tag_mode: str = "OR") -> None:
+    def execute_pipeline(self, tags: list[str], mode: str = "batch", tag_mode: str = "OR") -> None:
         """
         Execute the data pipeline based on tags and mode.
 
@@ -235,7 +241,7 @@ class LDPEngine:
             tag_mode: Tag filtering mode ("OR" or "AND")
         """
         print(f"\n{'='*60}")
-        print(f"LDP Engine Starting")
+        print("LDP Engine Starting")
         print(f"Environment: {self.environment}")
         print(f"Mode: {mode}")
         print(f"Tags: {tags}")
@@ -257,7 +263,7 @@ class LDPEngine:
 
         # Create @dp.table functions for all required tables
         print(f"\nCreating {len(execution_order)} table functions...")
-        table_configs_dict = {t['name']: t for t in all_tables}
+        table_configs_dict = {t["name"]: t for t in all_tables}
 
         for table_name in execution_order:
             self.create_table_function(table_configs_dict[table_name])
@@ -273,14 +279,16 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Lakeflow Declarative Pipeline Engine")
-    parser.add_argument('--tags', type=str, required=True, help='Comma-separated tags (e.g., "finance,daily")')
-    parser.add_argument('--mode', type=str, default='batch', choices=['batch', 'streaming'])
-    parser.add_argument('--tag-mode', type=str, default='OR', choices=['OR', 'AND'])
-    parser.add_argument('--config', type=str, default='config.yml')
-    parser.add_argument('--environment', type=str, help='Environment (dev/test/prod)')
+    parser.add_argument(
+        "--tags", type=str, required=True, help='Comma-separated tags (e.g., "finance,daily")'
+    )
+    parser.add_argument("--mode", type=str, default="batch", choices=["batch", "streaming"])
+    parser.add_argument("--tag-mode", type=str, default="OR", choices=["OR", "AND"])
+    parser.add_argument("--config", type=str, default="config.yml")
+    parser.add_argument("--environment", type=str, help="Environment (dev/test/prod)")
 
     args = parser.parse_args()
-    tags = [tag.strip() for tag in args.tags.split(',')]
+    tags = [tag.strip() for tag in args.tags.split(",")]
 
     engine = LDPEngine(config_path=args.config, environment=args.environment)
     engine.execute_pipeline(tags=tags, mode=args.mode, tag_mode=args.tag_mode)
