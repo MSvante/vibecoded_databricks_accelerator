@@ -21,9 +21,6 @@ on:
       - 'config.yml'
       - 'databricks.yml'
       - 'workflows/**'
-
-  # Trigger on tag creation for prod deployment
-  push:
     tags:
       - 'v*'
 
