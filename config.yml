@@ -1,0 +1,111 @@
+# Databricks ETL Framework Configuration
+# This file defines all tables in the data pipeline with their metadata
+
+# Landing Zone Configuration
+# The landing zone is where raw data files are deposited before ingestion
+landing_zone:
+  # Storage account name is derived from environment (dev/test/prod)
+  # Format: storage_account_{environment}
+  # Example: storage_account_dev, storage_account_prod
+  storage_account_pattern: "storage_account_{env}"
+
+  # Container name in the storage account
+  container: "landing-zone"
+
+  # Base path within the container
+  base_path: "raw"
+
+  # Default file format (can be overridden per table)
+  default_format: "parquet"
+
+# Table Definitions
+# Path derivation: {storage_account}/{container}/{base_path}/{table_name}/
+# Example: storage_account_dev/landing-zone/raw/customers/
+tables:
+  # Bronze Layer - Raw data ingestion from landing zone
+  - name: customers_bronze
+    layer: bronze
+    tags:
+      - bronze
+      - daily
+      - finance
+    depends_on: []
+    source:
+      # Path is auto-derived from table name: landing_zone/raw/customers/
+      # Override format if needed (defaults to landing_zone.default_format)
+      format: parquet
+    description: "Raw customer data from landing zone"
+
+  - name: orders_bronze
+    layer: bronze
+    tags:
+      - bronze
+      - daily
+    depends_on: []
+    source:
+      format: parquet
+    description: "Raw order transactions from landing zone"
+
+  # Silver Layer - Cleaned and validated data
+  - name: customers_silver
+    layer: silver
+    tags:
+      - silver
+      - daily
+      - finance
+    depends_on:
+      - customers_bronze
+    description: "Cleaned and deduplicated customer records"
+
+  - name: orders_silver
+    layer: silver
+    tags:
+      - silver
+      - daily
+    depends_on:
+      - orders_bronze
+      - customers_silver
+    description: "Validated orders with customer enrichment"
+
+  # Gold Layer - Business-level aggregations
+  - name: customer_metrics_gold
+    layer: gold
+    tags:
+      - gold
+      - daily
+      - finance
+      - analytics
+    depends_on:
+      - customers_silver
+      - orders_silver
+    description: "Customer lifetime value and engagement metrics"
+
+# Configuration Notes:
+#
+# Landing Zone Path Derivation:
+# - Storage account: storage_account_{environment} (e.g., storage_account_dev)
+# - Full path: abfss://{container}@storage_account_{env}.dfs.core.windows.net/{base_path}/{table_name_without_layer}/
+# - Example: abfss://landing-zone@storage_account_dev.dfs.core.windows.net/raw/customers/
+#
+# For table "customers_bronze":
+# - Removes "_bronze" suffix → "customers"
+# - Constructs path: {landing_zone}/customers/
+#
+# Table Fields:
+# - name: Table name (must match transformation function name)
+# - layer: One of [bronze, silver, gold]
+# - tags: List of tags for selective execution via workflow parameters
+# - depends_on: List of upstream table names (dependency resolution)
+# - source.format: File format in landing zone (parquet, csv, json, delta)
+# - description: Human-readable purpose
+#
+# Tag Strategy:
+# - Layer tags (bronze/silver/gold): Run specific data layers
+# - Frequency tags (daily/hourly): Run based on schedule
+# - Domain tags (finance/marketing/ops): Run domain-specific pipelines
+# - Priority tags (critical): Run high-priority tables only
+#
+# Example Workflow Schedules:
+# - 2 AM: tags=["finance"] → Runs finance-tagged tables across all layers
+# - 3 AM: tags=["daily"] → Runs all daily tables
+# - On-demand: tags=["bronze","critical"] → Runs critical bronze tables only

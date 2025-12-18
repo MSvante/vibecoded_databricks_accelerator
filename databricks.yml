@@ -1,0 +1,154 @@
+# Databricks Asset Bundle Configuration
+# This file defines how the ETL framework is packaged and deployed to Databricks
+
+bundle:
+  name: databricks_etl_framework
+
+# Include configuration files
+include:
+  - workflows/*.yml
+
+# Workspace configuration
+workspace:
+  root_path: "/Workspace/${bundle.name}/${bundle.target}"
+
+# Artifacts to sync
+sync:
+  include:
+    - "pipelines/**/*.py"
+    - "config.yml"
+  exclude:
+    - "**/__pycache__"
+    - "**/*.pyc"
+    - ".git/**"
+    - ".github/**"
+    - "*.md"
+    - "tests/**"
+
+# Variables accessible across all resources
+variables:
+  environment:
+    description: "Deployment environment"
+    default: "dev"
+
+  catalog_name:
+    description: "Unity Catalog name"
+    default: "etl_framework"
+
+  schema_name:
+    description: "Schema/database name"
+    default: "main"
+
+# Resources to deploy
+resources:
+  pipelines:
+    etl_dlt_pipeline:
+      name: "${bundle.name}_${bundle.target}_pipeline"
+      target: "${var.catalog_name}.${var.schema_name}"
+
+      # DLT configuration
+      configuration:
+        tag_mode: "OR"
+
+      # Pipeline libraries - all transformation modules
+      libraries:
+        - notebook:
+            path: "${workspace.file_path}/pipelines/transformations/bronze/customers_bronze.py"
+        - notebook:
+            path: "${workspace.file_path}/pipelines/transformations/bronze/orders_bronze.py"
+        - notebook:
+            path: "${workspace.file_path}/pipelines/transformations/silver/customers_silver.py"
+        - notebook:
+            path: "${workspace.file_path}/pipelines/transformations/silver/orders_silver.py"
+        - notebook:
+            path: "${workspace.file_path}/pipelines/transformations/gold/customer_metrics_gold.py"
+
+      # Cluster configuration for DLT
+      clusters:
+        - label: "default"
+          num_workers: 2
+          autoscale:
+            min_workers: 1
+            max_workers: 4
+
+      # Development vs Production settings
+      development: true  # Override in targets
+      continuous: false
+      photon: false
+
+      # Channel (current or preview)
+      channel: "CURRENT"
+
+  # Jobs reference the DLT pipeline
+  jobs:
+    etl_pipeline:
+      name: "${bundle.name}_${bundle.target}_job"
+
+      # Reference the workflow configuration
+      tasks:
+        - task_key: run_ldp_engine
+          pipeline_task:
+            pipeline_id: "${resources.pipelines.etl_dlt_pipeline.id}"
+
+      # Permissions
+      permissions:
+        - level: CAN_VIEW
+          group_name: "data-engineering"
+        - level: CAN_MANAGE_RUN
+          group_name: "data-engineering-admins"
+
+# Deployment targets
+targets:
+  # Development environment
+  dev:
+    mode: development
+    workspace:
+      host: "https://adb-XXXXXXXXXX.X.azuredatabricks.net"  # Replace with your workspace URL
+
+    variables:
+      environment: "dev"
+      catalog_name: "etl_framework_dev"
+      schema_name: "main"
+
+    resources:
+      pipelines:
+        etl_dlt_pipeline:
+          development: true
+          photon: false
+
+  # Production environment
+  prod:
+    mode: production
+    workspace:
+      host: "https://adb-YYYYYYYYYY.Y.azuredatabricks.net"  # Replace with your workspace URL
+
+    variables:
+      environment: "prod"
+      catalog_name: "etl_framework_prod"
+      schema_name: "main"
+
+    resources:
+      pipelines:
+        etl_dlt_pipeline:
+          development: false
+          photon: true  # Enable Photon in production for better performance
+
+      jobs:
+        etl_pipeline:
+          # Production job schedule
+          schedule:
+            quartz_cron_expression: "0 0 2 * * ?"  # Daily at 2 AM
+            timezone_id: "UTC"
+
+          # Production email notifications
+          email_notifications:
+            on_failure:
+              - data-eng-alerts@company.com
+            on_success: []
+
+# Permissions for the bundle
+permissions:
+  - level: CAN_MANAGE
+    group_name: "data-engineering-admins"
+  - level: CAN_VIEW
+    group_name: "data-engineering"

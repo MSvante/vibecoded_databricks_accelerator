@@ -1,0 +1,101 @@
+# Databricks Workflow Configuration for ETL Pipeline
+# This workflow executes the LDP engine with parameterized tags
+
+resources:
+  jobs:
+    # Finance Pipeline - Runs at 2 AM
+    etl_pipeline_finance:
+      name: "ETL Pipeline - Finance"
+      description: "Finance domain tables processing"
+
+      parameters:
+        - name: tags
+          default: "finance"
+        - name: mode
+          default: "batch"
+
+      # Schedule: Daily at 2 AM UTC
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "UTC"
+        pause_status: "UNPAUSED"
+
+      tasks:
+        - task_key: run_finance_pipeline
+          description: "Execute LDP engine with finance tags"
+
+          python_wheel_task:
+            package_name: "databricks_etl_framework"
+            entry_point: "ldp_engine"
+            parameters:
+              - "--tags"
+              - "{{job.parameters.tags}}"
+              - "--mode"
+              - "{{job.parameters.mode}}"
+              - "--environment"
+              - "${var.environment}"
+
+          new_cluster:
+            spark_version: "13.3.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 2
+
+      email_notifications:
+        on_failure:
+          - data-eng-alerts@company.com
+
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+
+    # Daily Pipeline - Runs at 3 AM
+    etl_pipeline_daily:
+      name: "ETL Pipeline - Daily"
+      description: "Daily batch processing for all tables"
+
+      parameters:
+        - name: tags
+          default: "daily"
+        - name: mode
+          default: "batch"
+
+      # Schedule: Daily at 3 AM UTC
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: "UTC"
+        pause_status: "UNPAUSED"
+
+      tasks:
+        - task_key: run_daily_pipeline
+          description: "Execute LDP engine with daily tags"
+
+          python_wheel_task:
+            package_name: "databricks_etl_framework"
+            entry_point: "ldp_engine"
+            parameters:
+              - "--tags"
+              - "{{job.parameters.tags}}"
+              - "--mode"
+              - "{{job.parameters.mode}}"
+              - "--environment"
+              - "${var.environment}"
+
+          new_cluster:
+            spark_version: "13.3.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 2
+            autoscale:
+              min_workers: 2
+              max_workers: 8
+
+      email_notifications:
+        on_failure:
+          - data-eng-alerts@company.com
+
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+
+# Variables referenced in this configuration
+variables:
+  environment:
+    description: "Deployment environment (dev/test/prod)"
+    default: "dev"
